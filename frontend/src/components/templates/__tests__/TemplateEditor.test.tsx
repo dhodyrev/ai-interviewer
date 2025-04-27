@@ -1,17 +1,59 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ChakraProvider, ThemeProvider, createTheme } from '@chakra-ui/react';
 import TemplateEditor from '../TemplateEditor';
+
+// Mock axios
+jest.mock('axios', () => ({
+  create: () => ({
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+    interceptors: {
+      request: {
+        use: jest.fn(),
+      },
+      response: {
+        use: jest.fn(),
+      },
+    },
+  }),
+}));
+
+// Mock localStorage
+const localStorageMock = {
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  clear: jest.fn(),
+  removeItem: jest.fn(),
+  length: 0,
+  key: jest.fn(),
+};
+Object.defineProperty(window, 'localStorage', { value: localStorageMock });
+
+// Mock Chakra UI components
+jest.mock('@chakra-ui/react', () => ({
+  ChakraProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Box: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button onClick={onClick}>{children}</button>
+  ),
+  FormControl: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  FormLabel: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
+  Input: ({ ...props }: any) => <input {...props} />,
+  Textarea: ({ ...props }: any) => <textarea {...props} />,
+  Select: ({ children, ...props }: any) => <select {...props}>{children}</select>,
+  VStack: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  HStack: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  IconButton: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+    <button onClick={onClick}>{children}</button>
+  ),
+}));
 
 // Mock the useParams hook
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
   useParams: () => ({ id: undefined }),
-}));
-
-// Mock the useNavigate hook
-jest.mock('react-router-dom', () => ({
-  ...jest.requireActual('react-router-dom'),
   useNavigate: () => jest.fn(),
 }));
 
@@ -23,14 +65,8 @@ global.fetch = jest.fn(() =>
 ) as jest.Mock;
 
 describe('TemplateEditor', () => {
-  const theme = createTheme();
-  
   const renderTemplateEditor = () => {
-    return render(
-      <ChakraProvider theme={theme}>
-        <TemplateEditor />
-      </ChakraProvider>
-    );
+    return render(<TemplateEditor />);
   };
 
   it('renders the template editor form', () => {
