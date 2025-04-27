@@ -1,0 +1,112 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: |
+          cd frontend && npm install
+          cd ../backend && npm install
+          
+      - name: Run tests
+        run: |
+          cd frontend && npm test
+          cd ../backend && npm test
+          
+  security-scan:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Run npm audit
+        run: |
+          cd frontend && npm audit
+          cd ../backend && npm audit
+          
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+          
+  build-and-push:
+    needs: security-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+          
+      - name: Build and push frontend
+        run: |
+          docker build -t ${{ secrets.ECR_REGISTRY }}/ai-interviewer-frontend:${{ github.sha }} ./frontend
+          docker push ${{ secrets.ECR_REGISTRY }}/ai-interviewer-frontend:${{ github.sha }}
+          
+      - name: Build and push backend
+        run: |
+          docker build -t ${{ secrets.ECR_REGISTRY }}/ai-interviewer-backend:${{ github.sha }} ./backend
+          docker push ${{ secrets.ECR_REGISTRY }}/ai-interviewer-backend:${{ github.sha }}
+          
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Deploy infrastructure
+        run: |
+          aws cloudformation deploy \
+            --template-file aws/cloudformation.yaml \
+            --stack-name ai-interviewer \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              Environment=production \
+              DBUsername=${{ secrets.DB_USERNAME }} \
+              DBPassword=${{ secrets.DB_PASSWORD }} \
+              FrontendDomain=${{ secrets.FRONTEND_DOMAIN }}
+              
+      - name: Update ECS services
+        run: |
+          aws ecs update-service --cluster ai-interviewer-cluster --service ai-interviewer-frontend --force-new-deployment
+          aws ecs update-service --cluster ai-interviewer-cluster --service ai-interviewer-backend --force-new-deployment
+          
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run smoke tests
+        run: |
+          curl -f ${{ secrets.FRONTEND_URL }}/health
+          curl -f ${{ secrets.API_URL }}/health 

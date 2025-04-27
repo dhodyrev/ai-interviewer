@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+version: '2.4'
+
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: always
+
+  postgres:
+    image: postgres:latest
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=ai_interviewer
+      - POSTGRES_PASSWORD=ai_interviewer_password
+      - POSTGRES_DB=ai_interviewer
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  backend:
+    build: ./backend
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ai-interviewer-backend:latest
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongodb
+      - postgres
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=${MONGODB_URI}
+      - POSTGRES_URI=${POSTGRES_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /ai-interviewer/backend
+        awslogs-region: ${AWS_REGION}
+        awslogs-stream: backend-${HOSTNAME}
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ai-interviewer-frontend:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=${API_URL}
+      - REACT_APP_FRONTEND_URL=${FRONTEND_URL}
+      - REACT_APP_AWS_REGION=${AWS_REGION}
+      - REACT_APP_COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID}
+      - REACT_APP_COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /ai-interviewer/frontend
+        awslogs-region: ${AWS_REGION}
+        awslogs-stream: frontend-${HOSTNAME}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+  postgres_data:

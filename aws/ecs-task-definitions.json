@@ -1,0 +1,143 @@
+{
+  "family": "ai-interviewer-frontend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ai-interviewer-frontend-task-role",
+  "containerDefinitions": [
+    {
+      "name": "frontend",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ai-interviewer-frontend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "REACT_APP_API_URL",
+          "value": "${API_URL}"
+        },
+        {
+          "name": "REACT_APP_FRONTEND_URL",
+          "value": "${FRONTEND_URL}"
+        },
+        {
+          "name": "REACT_APP_AWS_REGION",
+          "value": "${AWS_REGION}"
+        },
+        {
+          "name": "REACT_APP_COGNITO_USER_POOL_ID",
+          "value": "${COGNITO_USER_POOL_ID}"
+        },
+        {
+          "name": "REACT_APP_COGNITO_CLIENT_ID",
+          "value": "${COGNITO_CLIENT_ID}"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ai-interviewer/frontend",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "frontend"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
+
+{
+  "family": "ai-interviewer-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ai-interviewer-backend-task-role",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ai-interviewer-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "hostPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "5000"
+        },
+        {
+          "name": "MONGO_URI",
+          "value": "${MONGODB_URI}"
+        },
+        {
+          "name": "POSTGRES_URI",
+          "value": "${POSTGRES_URI}"
+        },
+        {
+          "name": "JWT_SECRET",
+          "value": "${JWT_SECRET}"
+        },
+        {
+          "name": "FRONTEND_URL",
+          "value": "${FRONTEND_URL}"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "value": "${OPENAI_API_KEY}"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "${AWS_REGION}"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:ai-interviewer-credentials:aws_access_key_id::"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:ai-interviewer-credentials:aws_secret_access_key::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ai-interviewer/backend",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "backend"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+} 

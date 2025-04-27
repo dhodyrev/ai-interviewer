@@ -1,0 +1,419 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AI Interviewer Infrastructure - MVP Configuration
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+  
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+
+  SubnetCidr1:
+    Type: String
+    Default: 10.0.1.0/24
+
+  SubnetCidr2:
+    Type: String
+    Default: 10.0.2.0/24
+
+  DBUsername:
+    Type: String
+    NoEcho: true
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+
+  FrontendDomain:
+    Type: String
+    Default: ai-interviewer.example.com
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-vpc
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetCidr1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref SubnetCidr2
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-subnet-2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${AWS::StackName}-cluster
+      CapacityProviders:
+        - FARGATE
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Settings:
+        - Name: containerInsights
+          Value: enabled
+
+  DocumentDBCluster:
+    Type: AWS::DocDB::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${AWS::StackName}-docdb
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VpcSecurityGroupIds:
+        - !Ref DocumentDBSecurityGroup
+      DBSubnetGroupName: !Ref DocumentDBSubnetGroup
+      Engine: docdb
+      EngineVersion: 4.0.0
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:00-sun:05:00
+      StorageEncrypted: true
+      KmsKeyId: !Ref KMSKey
+
+  DocumentDBSubnetGroup:
+    Type: AWS::DocDB::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for DocumentDB
+      DBSubnetGroupName: !Sub ${AWS::StackName}-docdb-subnet-group
+      SubnetIds:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
+  DocumentDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for DocumentDB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 27017
+          ToPort: 27017
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${AWS::StackName}-postgres
+      Engine: postgres
+      EngineVersion: 13.7
+      DBInstanceClass: db.t3.small
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:00-sun:05:00
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      KmsKeyId: !Ref KMSKey
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      DBSubnetGroupName: !Sub ${AWS::StackName}-rds-subnet-group
+      SubnetIds:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for encrypting resources
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-user-pool
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      MfaConfiguration: OFF
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${AWS::StackName}-client
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      CallbackURLs:
+        - !Sub https://${FrontendDomain}/callback
+      LogoutURLs:
+        - !Sub https://${FrontendDomain}/logout
+      SupportedIdentityProviders:
+        - COGNITO
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${AWS::StackName}-alb
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ALB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${AWS::StackName}-frontend-tg
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${AWS::StackName}-backend-tg
+      Port: 5000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: 443
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref SSLCertificate
+
+  SSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref FrontendDomain
+      ValidationMethod: DNS
+
+  CloudWatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-cpu-utilization
+      AlarmDescription: Alarm when CPU utilization exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+      AlarmActions:
+        - !Ref AutoScalingPolicy
+
+  AutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-scaling-policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 80.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 2
+      ResourceId: !Sub service/${ECSCluster}/${ServiceName}
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+
+  DocumentDBEndpoint:
+    Description: DocumentDB Endpoint
+    Value: !GetAtt DocumentDBCluster.Endpoint
+
+  RDSInstanceEndpoint:
+    Description: RDS Instance Endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref CognitoUserPoolClient
+
+  LoadBalancerDNS:
+    Description: Application Load Balancer DNS
+    Value: !GetAtt ApplicationLoadBalancer.DNSName 
