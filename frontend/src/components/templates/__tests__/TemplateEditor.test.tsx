@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ChakraProvider } from '@chakra-ui/react';
+import { ChakraProvider, ThemeProvider, createTheme } from '@chakra-ui/react';
 import TemplateEditor from '../TemplateEditor';
 
 // Mock the useParams hook
@@ -15,10 +15,19 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => jest.fn(),
 }));
 
+// Mock the fetch API
+global.fetch = jest.fn(() =>
+  Promise.resolve({
+    json: () => Promise.resolve({}),
+  })
+) as jest.Mock;
+
 describe('TemplateEditor', () => {
+  const theme = createTheme();
+  
   const renderTemplateEditor = () => {
     return render(
-      <ChakraProvider>
+      <ChakraProvider theme={theme}>
         <TemplateEditor />
       </ChakraProvider>
     );

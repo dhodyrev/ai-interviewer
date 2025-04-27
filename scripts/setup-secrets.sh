@@ -6,41 +6,32 @@ if ! command -v aws &> /dev/null; then
     exit 1
 fi
 
-# Check if required environment variables are set
-if [ -z "$AWS_REGION" ] || [ -z "$AWS_ACCOUNT_ID" ]; then
-    echo "Please set AWS_REGION and AWS_ACCOUNT_ID environment variables."
+# Function to create a secret in AWS Secrets Manager
+create_secret() {
+    local secret_name=$1
+    local secret_value=$2
+    
+    echo "Creating secret: $secret_name"
+    aws secretsmanager create-secret \
+        --name "$secret_name" \
+        --description "Secret for AI Interviewer application" \
+        --secret-string "$secret_value" \
+        --region "$AWS_REGION"
+}
+
+# Read environment variables from .env file
+if [ -f .env ]; then
+    source .env
+else
+    echo "Error: .env file not found"
     exit 1
 fi
 
-# Create secrets for AWS credentials
-aws secretsmanager create-secret \
-    --name ai-interviewer-credentials \
-    --description "AWS credentials for AI Interviewer" \
-    --region $AWS_REGION
+# Create secrets
+create_secret "ai-interviewer/db-credentials" "{\"username\":\"$DB_USERNAME\",\"password\":\"$DB_PASSWORD\"}"
+create_secret "ai-interviewer/jwt-secret" "{\"secret\":\"$JWT_SECRET\"}"
+create_secret "ai-interviewer/openai-api-key" "{\"key\":\"$OPENAI_API_KEY\"}"
+create_secret "ai-interviewer/email-credentials" "{\"smtp_host\":\"$SMTP_HOST\",\"smtp_port\":\"$SMTP_PORT\",\"smtp_user\":\"$SMTP_USER\",\"smtp_password\":\"$SMTP_PASSWORD\"}"
+create_secret "ai-interviewer/redis-credentials" "{\"host\":\"$REDIS_HOST\",\"port\":\"$REDIS_PORT\",\"password\":\"$REDIS_PASSWORD\"}"
 
-# Create secrets for database credentials
-aws secretsmanager create-secret \
-    --name ai-interviewer-db-credentials \
-    --description "Database credentials for AI Interviewer" \
-    --region $AWS_REGION
-
-# Create secrets for JWT
-aws secretsmanager create-secret \
-    --name ai-interviewer-jwt-secret \
-    --description "JWT secret for AI Interviewer" \
-    --region $AWS_REGION
-
-# Create secrets for OpenAI API key
-aws secretsmanager create-secret \
-    --name ai-interviewer-openai-key \
-    --description "OpenAI API key for AI Interviewer" \
-    --region $AWS_REGION
-
-# Create secrets for Cognito configuration
-aws secretsmanager create-secret \
-    --name ai-interviewer-cognito-config \
-    --description "Cognito configuration for AI Interviewer" \
-    --region $AWS_REGION
-
-echo "Secrets have been created. Please add the actual values using the AWS Console or CLI."
-echo "Example: aws secretsmanager put-secret-value --secret-id ai-interviewer-credentials --secret-string '{\"aws_access_key_id\":\"YOUR_KEY\",\"aws_secret_access_key\":\"YOUR_SECRET\"}'" 
+echo "Secrets have been created successfully in AWS Secrets Manager" 
